@@ -1,0 +1,120 @@
+      body {
+        background-color: #455;
+        color: white;
+        display: flex;
+        flex-direction: column;
+        font-size: x-small;
+      }
+
+      section, div {
+        display: flex;        
+      }
+      body > section {
+        flex-shrink: 1;
+        flex-wrap: wrap;
+      }      
+      section#main {
+        display: flex;
+        flex-direction: row-reverse;
+      }
+      section#table {
+        order: 2;
+        flex-direction: column;
+        min-width: 500px;
+      }
+      #table div {
+        flex-direction: row;
+        align-items: flex-start;
+        margin: 0 0 2em 0;
+      }
+
+      #layout {
+        display: flex;
+        flex-direction: column;
+        margin: 1em;
+      }
+      #layout button {
+        display: block;
+        align-self: flex-start;
+      }
+      #layout div {
+        position: relative;
+      }
+
+
+
+      button {
+        margin: 0.2em;
+        padding: 3px 8px;
+        border-radius: 7px;
+        background-color: #424256;
+        color: white;
+      }
+
+      #layout #zoom {
+        display: block;
+        height: 200px;
+        width: 200px;
+        margin: 1em;
+      }
+      input {
+        color: blue;
+        font-size: 1em;
+      }
+      #tableBox {
+        max-height: calc(80vh - 200px);
+        overflow: auto;
+      }
+      table {
+        width: 100%;
+        /* display: flex; */
+        flex-grow: 1;
+        flex-shrink: 0;
+        border-collapse: collapse;
+        border: solid 1px #777;
+      }
+      tr {
+        border: solid 1px #777;
+      }
+
+      tr.active {
+        background-color: darkred;
+        color: white;
+      }
+
+      th, td {
+        text-align: center;
+        padding: 0.5em
+      }
+
+      canvas {
+        border: none;
+        background-color: darkgrey;
+      }
+      #graph {
+        height: 200px;
+        border: solid 2px white;
+        position: relative;
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-end;
+      }
+      #ref_image {
+        border: none;
+      }
+      button.active {
+        background-color: darkred;
+        color: white;
+      }
+
+      tr.click_highlight {
+        background-color: orange;
+      }
+
+      label {
+        display: flex;
+        padding: 1em;
+        flex-direction: row;
+        justify-content: center;
+        font-size: 1.4em;
+      }

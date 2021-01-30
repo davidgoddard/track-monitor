@@ -1,0 +1,14 @@
+{
+  "name": "sensoreditor",
+  "version": "1.0.0",
+  "description": "Sensor and Block editor app",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "D. Goddard",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1"
+  }
+}

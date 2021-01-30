@@ -1,0 +1,248 @@
+ <html>
+  <meta charset="UTF-8">
+  <meta name="description" content="Track Monintor setup app">
+  <meta name="author" content="David Goddard">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+  <script src="/js/paho-mqtt-min.js"></script>  
+
+  <link rel="stylesheet" href="/css/style.css">
+
+  <style>
+
+    div {
+      display: inline-block;
+      border: solid 2px white;
+      border-radius: 10px;
+      padding: 5px;
+      margin: 3px;
+      text-align: center;
+      box-sizing: content-box;
+      position: relative;
+    }
+
+    div button {
+      display: block;
+      width: 10em;
+      margin: 5 auto;
+      box-sizing: border-box;
+    }
+
+    div span {
+      position: absolute;
+      top: 0px;
+      left: 12px;
+      font-size: 3em;
+    }
+
+    .current {
+      border: solid 2px red;
+    }
+
+    img {
+      width: 300px;
+    }
+
+    span {
+      margin-left: 3em;
+    }
+    span input {
+      vertical-align: middle;
+    }
+  </style>
+
+    <body>
+
+      <header>
+        <h1>Reference Image Manager</h1>
+      </header>
+      <section>
+            <button onclick="window.location = '/'">Back</button>
+            <button id="snapshot">Take Reference Image</button>
+            <span>Zoom: <input type="range" min="200" max="800" step="10" value="300" oninput="adjustScale(this.value)"/></span>
+      </section>
+
+      <section id="images">
+
+      </section>
+    </body>
+
+    <script>
+
+
+
+//=============================================================================
+// Map DOM elements
+//=============================================================================
+
+let saveButton = document.querySelector('#save')
+let snapshotButton = document.querySelector('#snapshot')
+let refImage = document.querySelector('#ref_image')
+let images = document.querySelector('#images')
+
+let scale = 300;
+const adjustScale = (width) => {
+  scale = width;
+  console.log(scale)
+  let images = document.querySelectorAll('img')
+  for ( let i = 0; i < images.length;  i++ ){
+    images[i].style.width = scale + 'px';
+  }
+}
+
+//=============================================================================
+// Fetch all current reference images from server
+//=============================================================================
+
+let references = []
+
+const fetchReferences = () => {
+
+  fetch('/references')
+  .then((data)=>{
+    return data.json();
+  })
+  .then((ref_files)=>{
+    references = ref_files;
+    images.innerHTML = '';
+    let html = '';
+    references.forEach((ref, idx)=>{
+      html += `<div id="ref_${idx}"><span class="score"></span><img style="width: ${scale}px" src="/ref/${ref}"><button onclick="remove('${ref}')">Delete</button></div>`
+    })
+    html += ''
+    images.innerHTML = html;
+    
+  })
+  .catch((err)=>{
+    console.error(err)
+  })  
+
+}
+
+
+//=============================================================================
+// Get initial set of reference images
+//=============================================================================
+
+fetchReferences();
+
+
+//=============================================================================
+// Instruct app to use the latest data by triggering a re-start via save action
+//=============================================================================
+
+const save = () => {
+  let message = new Paho.MQTT.Message("saved");
+  message.destinationName = "/TrackMonitor/webapp/config/";
+  client.send(message);
+}
+
+
+//=============================================================================
+// Request image to be removed from references collection
+//=============================================================================
+
+const remove = (file) => {
+
+  fetch('/remove', 
+    {
+      method: 'POST', // or 'PUT'
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({file: file}, null, 3)
+    }
+  )
+  .then(()=>{
+    let message = new Paho.MQTT.Message("saved");
+    message.destinationName = "/TrackMonitor/webapp/config/";
+    client.send(message);
+    fetchReferences();    
+  })
+  .catch((err)=>{
+    console.error(err)
+  })  
+}
+
+
+//=============================================================================
+// Request a new reference image be taken from the live camera feed
+//=============================================================================
+
+const snapshot = () => {
+  let message = new Paho.MQTT.Message("save");
+  message.destinationName = "/TrackMonitor/webapp/snapshot";
+  client.send(message);
+}
+
+snapshotButton.onclick = snapshot;
+currentRefImage = null;
+currentRefSimilarity = -1;
+
+//=============================================================================
+// Handle communication with MQTT broker
+//=============================================================================
+
+
+// Create a client instance
+client = new Paho.MQTT.Client('raspberrypi.local', 9001, "ref-manager");
+// set callback handlers
+client.onConnectionLost = onConnectionLost;
+client.onMessageArrived = onMessageArrived;
+
+// connect the client
+client.connect({onSuccess:onConnect});
+
+
+// called when the client connects
+function onConnect() {
+  // Once a connection has been made, make a subscription and send a message.
+  console.log("onConnect");
+  client.subscribe("/TrackMonitor/webapp/saved");
+  client.subscribe("/TrackMonitor/track/reference/#");
+}
+
+// called when the client loses its connection
+function onConnectionLost(responseObject) {
+  if (responseObject.errorCode !== 0) {
+    console.log("onConnectionLost:"+responseObject.errorMessage);
+  }
+}
+
+// called when a message arrives
+function onMessageArrived(message) {
+  // console.log(message)
+  console.log(message.destinationName + " onMessageArrived: "+message.payloadString);
+  if ( message.topic == '/TrackMonitor/webapp/saved' ){
+    console.log("GOT IT!", message)
+    fetchReferences();
+  }
+  let topic = message._getDestinationName()
+  // console.log('Topic', topic, message.payloadString)
+  if ( topic.includes("/reference/id") ){
+    currentRefImage = parseInt(message.payloadString);
+
+    console.log('New reference image is', currentRefImage, currentRefSimilarity)
+    let x = document.querySelectorAll('.current')
+    for ( let c of x ){
+      c.classList.remove('current')
+    }
+    let i = document.querySelector('#ref_' + currentRefImage)
+    if ( i ){
+      i.classList.add('current');
+    }
+  }
+  if ( topic.includes("/reference/score") ){
+    currentRefSimilarity = parseFloat(message.payloadString)
+    let i = document.querySelector('#ref_' + currentRefImage)
+    if ( i ){
+      i.querySelector('.score').textContent = currentRefSimilarity.toFixed(0);
+    }
+  }
+}
+
+
+    </script>
+
+</html>

@@ -1,0 +1,772 @@
+ <html>
+  <meta charset="UTF-8">
+  <meta name="description" content="Track Monintor setup app">
+  <meta name="author" content="David Goddard">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="/js/paho-mqtt-min.js"></script>  
+
+  <link rel="stylesheet" href="/css/style.css">
+
+    <body>
+
+      <header>
+        <h1>Sensor and Block Editor</h1>
+      </header>
+      <section>
+        <section id="table">
+          <div>
+            <button id="undo">Undo</button>
+            <button id="addSensor">Add Sensor</button>
+            <button id="addBlock">Add Block</button>
+            <button id="resequence">Renumber</button>
+            <button id="save">Save</button>
+            <button id="references">Manage Reference Images</button>
+
+          </div>
+            <label>Default Sensitivity (new only): 
+              <input id="default_sensitivity" type="number" min="1" max="50" step="1" value="14"/>
+            </label>
+          <div id="tableBox">
+            <table onmouseout="highlight()">
+              <thead>
+                <tr>
+                  <th>ID</th><th>Points</th><th>Type</th><th>Radius</th><th>Sensitivity / Trigger Level</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+              </tbody>
+            </table>
+          </div>
+          <div id="graph"><canvas></canvas></div>
+        </section>
+
+        <section id="layout">
+            <button id="showLive">Overlay Sensor Activity (Live)</button>
+            <canvas id="zoom"></canvas>
+          <div>
+            <div>
+              <img id="ref_image" style="display:none" src="/layout"/>
+              <canvas></canvas>
+            </div>
+          </div>
+        </section>
+
+      </section>
+    </body>
+
+    <script>
+
+
+const WIDTH = 640
+const HEIGHT = 360
+
+let canvas = document.querySelector("#layout div canvas");
+let context = canvas.getContext("2d");
+let zoom = document.querySelector("#zoom");
+let zcontext = zoom.getContext("2d");
+let layout = document.querySelector("#layout div img");
+canvas.height = HEIGHT
+canvas.width = WIDTH
+let undo = document.querySelector('#undo')
+let addSensorButton = document.querySelector('#addSensor')
+let addBlockButton = document.querySelector('#addBlock')
+let saveButton = document.querySelector('#save')
+let referencesButton = document.querySelector('#references')
+let refImage = document.querySelector('#ref_image')
+let showLive = document.querySelector('#showLive')
+let graphContainer = document.querySelector("#graph")
+let resequenceButton = document.querySelector("#resequence")
+
+/* Get current data from server */
+
+raw_data = null;
+data = []
+
+//=============================================================================
+// Fetch current sensor and block definitions
+//=============================================================================
+
+fetch('/config')
+.then((data)=>{
+  return data.json();
+})
+.then((config)=>{
+  console.log(config)
+  raw_data = config;
+
+  /* Convert data into a list of points to draw */
+
+  for ( let rec of raw_data.POI ){
+    let a = JSON.parse(JSON.stringify(rec))
+    for ( let i in rec.points ){
+      let p = a.points[i]
+      p[0] = p[0] * WIDTH
+      p[1] = p[1] * HEIGHT
+    }
+    data.push(a)
+  }
+
+  renderData();
+  draw();
+
+})
+
+
+let maxSensorID = 0;
+
+//=============================================================================
+// Create a table of all known sensors and blocks
+//=============================================================================
+const renderData = ()=>{
+  let table = document.querySelector("tbody")
+  table.innerHTML = '';
+  let html = '';
+  maxSensorID = 0;
+  for ( let sensor of data ){
+    html += `<tr id="row_${sensor.id}" ${(current && current.id == sensor.id)?'class="click_highlight"':''} onmouseover="highlight(${sensor.id})">
+      <td>${sensor.id}</td>
+      <td>${sensor.points.length}</td>
+      <td>${sensor.type}</td>
+      <td><input type="number" min=3 max=20 step=1 value="${sensor.radius}" oninput="setRadius(${sensor.id}, this.value)"/></td>
+      <td><input type="number" min=1 max=40 step=1 value="${sensor.sensitivity}" onchange="setSensitivity(${sensor.id}, this.value)"/><button onclick="monitor(this, ${sensor.id}); ">Monitor Live</button></td>
+      <td>
+        <button onclick="deleteItem(${sensor.id});">Delete</button>
+      </td>
+    </tr>`
+    maxSensorID = (sensor.id > maxSensorID)?sensor.id:maxSensorID;
+  }
+  table.innerHTML = html;
+}
+
+//=============================================================================
+// Track mouse over the table and highlight corresponding parts of the layout
+//=============================================================================
+
+const highlight = (id) => {
+  if ( !current ){
+    draw(id)
+  }
+}
+
+//=============================================================================
+// Adjust the global data for the radius
+//=============================================================================
+
+const setRadius = (id, radius) => {
+  for ( let s in data ){
+    let sensor = data[s]
+    if ( sensor.id == id ){
+      data[s].radius = parseInt(radius); 
+    }
+  }
+  draw();
+}
+
+//=============================================================================
+// Enable live monitoring by sending a message to the track monitor
+//=============================================================================
+
+currentMonitorSensor = null;
+
+const monitor = (button, id) => {
+  let previous = document.querySelectorAll('button.active');
+  for ( let i = 0; i < previous.length; i++ ){
+    previous[i].classList.remove('active')
+  }
+  if ( button == previous ){
+    currentMonitorSensor = null;
+  } else {
+    button.classList.add('active');
+    let message = new Paho.MQTT.Message("monitor");
+    message.destinationName = "/TrackMonitor/webapp/monitor/" + id;
+    console.log(message.destinationName)
+    client.send(message);
+    for ( let s in data ){
+      let sensor = data[s]
+      if ( sensor.id == id ){
+        currentMonitorSensor = sensor;
+      }
+    }
+    big_data = []
+  }
+}
+
+//=============================================================================
+// Adjust the global data for the sensitivity or trigger level
+//=============================================================================
+
+const setSensitivity = (id, sensitivity) => {
+  for ( let s in data ){
+    let sensor = data[s]
+    if ( sensor.id == id ){
+      data[s].sensitivity = parseFloat(sensitivity);
+    }
+  }
+}
+
+const setClicked = (id) => {
+  let list = document.querySelectorAll('.click_highlight')
+  for ( let i = 0; i < list.length; i++ ){
+    list[i].classList.remove('click_highlight')
+  }
+  document.getElementById('row_' + id).classList.add('click_highlight')
+}
+
+//=============================================================================
+// Put selected sensor into scope for editing in the main image
+//=============================================================================
+
+const editMode = (id) => {
+    for ( let sensor of data ){
+      if ( sensor.id == id ){
+        current = sensor;
+      }
+    }
+    console.log('Found', id, current)
+    draw(id)
+    let r = document.getElementById('row_' + current.id)
+    r.scrollIntoView()
+    setClicked(id)
+}
+
+//=============================================================================
+// Remove a sensor/block definition from the global data
+//=============================================================================
+
+const deleteItem = (id) => {
+  for ( let sensor in data ){
+    if ( data[sensor].id == id ){
+      data.splice(sensor, 1)
+    }
+  }  
+  draw()
+  renderData()
+}
+
+//=============================================================================
+// Save current global data to the track monitor
+//=============================================================================
+
+const save = () => {
+  let output = JSON.parse(JSON.stringify(data))
+
+  for ( let sensor of output ){
+    for ( let p in sensor.points ){
+      let pos = sensor.points[p]
+      sensor.points[p] = [pos[0] / WIDTH, pos[1] / HEIGHT]
+    }
+    sensor.state = 0
+    // sensor.sensitivity = 5
+  }
+  raw_data.POI = output
+  fetch('/config', 
+    {
+      method: 'POST', // or 'PUT'
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(raw_data, null, 3)
+    }
+  )
+  .then((res)=>{
+    console.log("OK", res);
+    let message = new Paho.MQTT.Message("saved");
+    message.destinationName = "/TrackMonitor/webapp/config/";
+    client.send(message);
+
+  })
+  .catch((err)=>{
+    console.error(err);
+  })
+}
+
+//=============================================================================
+// Create a sensor definition
+//=============================================================================
+
+const addSensor = ()=>{
+  let newItem = maxSensorID + 1;
+  data.push( {id: newItem, type: 'Sensor', points:[], radius:5, sensitivity: parseInt(document.getElementById('default_sensitivity').value)})
+  current = data[data.length-1];
+  showingLive = false;
+  renderData();
+  editMode(newItem)
+}
+
+//=============================================================================
+// Create a new block definition
+//=============================================================================
+
+const addBlock = ()=>{
+  let newItem = maxSensorID + 1;
+  data.push( {id: newItem, type: 'Block', points:[], radius:5, sensitivity: parseInt(document.getElementById('default_sensitivity').value)})
+  current = data[data.length-1]
+  showingLive = false;
+  renderData();
+  editMode(newItem)
+}
+
+//=============================================================================
+// Switch page to the reference image app
+//=============================================================================
+
+const references = () => {
+  window.location = '/ref_manager.html'
+}
+
+//=============================================================================
+// Renumber all sensors starting from 1
+//=============================================================================
+
+const renumber = () => {
+  data.forEach((sensor, id)=>{
+    sensor.id = id + 1
+  })
+  console.log(data)
+  renderData();
+}
+
+
+//=============================================================================
+// Start/stop showing the current state of the sensors over a reference image
+//=============================================================================
+
+let showingLive = false;
+const enableShowLive = () => {
+  if ( showingLive ){
+    showLive.textContent = 'Overlay Sensor Activity (Live)'
+    showingLive = false
+    let items = document.querySelectorAll('tr')
+    for ( let i = 0; i < items.length; i++ ){
+      items[i].classList.remove('active')
+    }
+    draw()
+  } else {
+    showingLive = true;
+    showLive.textContent = 'Stop showing activity'
+    drawActiveState()
+  }
+}
+
+//=============================================================================
+// Map HTML elements to the corresponding click event handlers defined above
+//=============================================================================
+
+addSensorButton.onclick = addSensor;
+addBlockButton.onclick = addBlock;
+saveButton.onclick = save;
+referencesButton.onclick = references;
+showLive.onclick = enableShowLive;
+resequenceButton.onclick = renumber;
+
+let drawing = false;
+let current = null;
+
+//=============================================================================
+// Remove the last added item to the sensor in context via the edit button
+//=============================================================================
+
+undo.onclick = ()=>{
+  if ( current ){
+    current.points.pop();
+    draw(current.id);   
+    renderData();
+  }
+}
+
+//=============================================================================
+// show the active sensors over a reference image
+//=============================================================================
+
+
+function drawActiveState(highlight = null){
+  if ( ! showingLive ) return;
+
+    // Draw blocks first so that sensors can be drawn over the top
+    // otherwise the sensors may not be visible
+
+    context.clearRect(0,0,canvas.width, canvas.height);
+    context.drawImage(layout, 0, 0, WIDTH, HEIGHT)
+    for ( let sensor of data ){
+      if ( sensor.type == 'Block' && sensor.points.length > 0 ){
+
+        document.getElementById("row_" + sensor.id).classList.remove('active')
+        if ( sensor.state == 1 ){
+          document.getElementById("row_" + sensor.id).classList.add('active')
+        }
+        for ( let pos of sensor.points )
+        {
+          context.beginPath();
+          context.arc(pos[0], pos[1], sensor.radius, 0, 2*Math.PI);
+          context.strokeStyle = "red";
+          if ( sensor.state == 1){
+            context.fillStyle = (highlight && highlight == sensor.id)?"orange":"red";
+            context.fill();
+          } else {
+            if ( highlight && highlight == sensor.id ){
+              context.fillStyle = "orange";
+              context.fill();
+            }
+          }
+          context.stroke();
+        }
+      } 
+    }
+    for ( let sensor of data ){
+      if ( sensor.type == 'Sensor' && sensor.points.length > 0 ){
+        document.getElementById("row_" + sensor.id).classList.remove('active')
+        if ( sensor.state == 1 ){
+          document.getElementById("row_" + sensor.id).classList.add('active')
+        }
+        for ( let pos of sensor.points ){
+          context.beginPath();
+          context.arc(pos[0], pos[1], sensor.radius, 0, 2*Math.PI);
+          context.strokeStyle = "blue"
+          if ( sensor.state == 1){
+            context.fillStyle = (highlight && highlight == sensor.id)?"orange":"red";
+            context.fill();
+          } else {
+            if ( highlight && highlight == sensor.id ){
+              context.fillStyle = "orange";
+              context.fill();
+            }
+          }
+          context.stroke();
+        }
+      }
+    }
+}
+
+//=============================================================================
+// Show basic rendition of the sensors over the reference image for editing
+//=============================================================================
+
+function draw(highlight = null){
+  if ( showingLive ){
+    drawActiveState(highlight)
+  } else {
+    context.clearRect(0,0,canvas.width, canvas.height);
+    context.drawImage(layout, 0, 0, WIDTH, HEIGHT)
+    for ( let sensor of data ){
+      if ( sensor.type == 'Block' && sensor.points.length > 0 ){
+        context.moveTo(sensor.points[0][0], sensor.points[0][1])
+        
+
+        for ( let pos of sensor.points )
+        {
+          context.beginPath();
+          context.arc(pos[0], pos[1], sensor.radius, 0, 2*Math.PI);
+          context.strokeStyle = "#ff0000";
+          context.stroke();
+          if ( (highlight && highlight == sensor.id) ){
+            context.beginPath();
+            context.arc(pos[0], pos[1], sensor.radius, 0, 2*Math.PI);
+            context.strokeStyle = "#ffffff" ;
+            context.fillStyle = "red";
+            context.fill();
+            context.stroke();
+
+          }
+        }
+      } else {
+        for ( let pos of sensor.points ){
+          context.beginPath();
+          context.arc(pos[0], pos[1], sensor.radius, 0, 2*Math.PI);
+          context.strokeStyle = "#0000ff";
+          context.stroke();
+          if ( (highlight && highlight == sensor.id) ){
+            context.beginPath();
+            context.arc(pos[0], pos[1], sensor.radius, 0, 2*Math.PI);
+            context.strokeStyle = "#ffffff" ;
+            context.fillStyle = "red";
+            context.fill();
+            context.stroke();
+
+          }
+        }
+      }
+    }
+  }
+}
+
+//=============================================================================
+// Add a point via mouse movement/click to the current sensor
+//=============================================================================
+
+function addPoint(e) {
+  let pos = getMousePos(canvas, e);
+
+  // Show the point in the zoomed window
+
+  zoom.width = 200;
+  zoom.height = 200;
+  let r = layout.getBoundingClientRect();
+
+  zcontext.drawImage(canvas, pos.x-15, pos.y-15, 30, 30, 0, 0, 200, 200);
+
+  // draw an X over the middle of the zoom
+
+  zcontext.beginPath();
+  zcontext.strokeStyle = 'white'    
+  let x = 100;
+  let y = 100;
+  zcontext.moveTo(x - 20, y - 20);
+  zcontext.lineTo(x + 20, y + 20);
+  zcontext.stroke();
+  zcontext.moveTo(x + 20, y - 20);
+  zcontext.lineTo(x - 20, y + 20);
+  zcontext.stroke();
+
+  // If user is drawing, record the points they draw
+
+  if ( current && drawing ){
+    if ( current.type == 'Block' ){
+      if ( current.points.length > 0 ){
+        let last = current.points[current.points.length-1]
+        distance = Math.sqrt((last[0]-pos.x) * (last[0]-pos.x) + ((last[1]-pos.y) * (last[1]-pos.y)))
+        if ( distance > current.radius ){
+
+          current.points.push([pos.x, pos.y])
+          draw(current.id)
+        }
+      } else {
+        current.points.push([pos.x, pos.y])
+        draw(current.id)
+      }
+    } else {
+      current.points = [[pos.x, pos.y]]
+      draw(current.id)
+    }
+  }
+}
+
+//=============================================================================
+// Determine where on the image the user click/dragged
+//=============================================================================
+
+function getMousePos(canvas, evt) {
+    var rect = canvas.getBoundingClientRect();
+    return {
+      x: evt.clientX - rect.left,
+      y: evt.clientY - rect.top
+    };
+}
+
+//=============================================================================
+// Trap and handle the mouse events
+//=============================================================================
+
+canvas.addEventListener('mousedown', (e)=>{
+  console.log('Down', drawing, 'Current', current)
+  drawing = true;
+  if ( current ){
+    addPoint(e);
+  } else {
+    let xy = getMousePos(canvas, e)
+    for ( let sensor of data ){
+      for ( let point of sensor.points ){
+        let d = Math.sqrt( ( point[0] - xy.x ) * ( point[0] - xy.x ) + ( point[1] - xy.y ) * ( point[1] - xy.y ) )
+        if ( d < sensor.radius ){
+          console.log('Clicked in sensor', sensor)
+          let r = document.getElementById('row_' + sensor.id)
+          r.scrollIntoView()
+          setClicked(sensor.id);
+          highlight(sensor.id)
+        }
+      }
+    }
+  }
+});
+canvas.addEventListener('mouseout', ()=>{
+  drawing = false;
+  current = null;
+});
+canvas.addEventListener('mouseup', ()=>{
+  drawing = false;
+  renderData();
+});
+canvas.addEventListener('mousemove', addPoint);
+// canvas.addEventListener('mousedown', addPoint);
+
+
+//=============================================================================
+// Show live sensor data in a graph
+//=============================================================================
+
+big_data = []
+
+function drawGraph(data){
+  let graph = graphContainer;
+  let canvas = graph.querySelector('canvas');
+  canvas.height = 200;
+  canvas.width = 1000;
+  let ctx = canvas.getContext("2d")
+  ctx.clearRect(0,0,canvas.width, canvas.height);
+  if ( currentMonitorSensor ){
+
+    big_data.push(...data)
+
+    while ( big_data.length > 2000 ){
+      big_data.shift();
+    }
+
+    let min = Infinity
+    let max = -Infinity
+    big_data.forEach((x)=>{
+      let s = x.split('|');
+      // console.log(x, s)
+      let score = parseInt(s[1])
+      let state = parseInt(s[0])
+      min = (min > score)?score:min;
+      max = (max < score)?score:max;
+    })
+    // console.log('Min = ', min, 'Max', max)
+
+    ctx.font = "20px Arial";
+    ctx.fillText(`Sensor: ${currentMonitorSensor.id}     Min value = ${min} Max value = ${max} Trigger Level = ${currentMonitorSensor.sensitivity}`, 10, 30);
+
+    let scale = 2
+    
+    ctx.beginPath();
+    ctx.strokeStyle = 'blue';
+    ctx.strokeWidth = 1;
+    sensY = (200 - (scale * currentMonitorSensor.sensitivity) ) ;
+    // sensY = 200 - 30
+    ctx.moveTo(0, sensY);
+    ctx.lineTo(1000, sensY);
+    ctx.stroke();
+
+    let last = [0,0]
+    big_data.forEach((value, idx)=>{
+      ctx.beginPath();
+      ctx.moveTo(last[0], last[1])
+      ctx.strokeStyle = "red";
+      let bits = value.split('|')
+      let state = parseInt(bits[0])
+      let score = parseInt(bits[1])
+      y = 200 - (scale * score)
+      x = 0.5 * idx
+      last = [x, y]
+      ctx.lineTo(x, y)
+      ctx.lineStyle = 10
+      ctx.stroke();    
+    })
+  }
+  
+}
+
+
+//=============================================================================
+// Fetch all current reference images from server
+//=============================================================================
+
+let referenceImages = []
+let currentRefImage = 0
+
+const fetchReferences = () => {
+
+  fetch('/references')
+  .then((data)=>{
+    return data.json();
+  })
+  .then((ref_files)=>{
+    referenceImages = ref_files;    
+  })
+  .catch((err)=>{
+    console.error(err)
+  })  
+
+}
+
+
+//=============================================================================
+// Get initial set of reference images
+//=============================================================================
+
+fetchReferences();
+
+
+
+
+//=============================================================================
+// Handle communication with MQTT broker
+//=============================================================================
+
+
+// Create a client instance
+client = new Paho.MQTT.Client('raspberrypi.local', 9001, "block-setup");
+// set callback handlers
+client.onConnectionLost = onConnectionLost;
+client.onMessageArrived = onMessageArrived;
+
+// connect the client
+client.connect({onSuccess:onConnect, keepAliveInterval: 3000});
+
+
+// called when the client connects
+function onConnect() {
+  // Once a connection has been made, make a subscription and send a message.
+  console.log("onConnect");
+  client.subscribe("/TrackMonitor/webapp/saved");
+  client.subscribe("/TrackMonitor/webapp/monitorResult");
+  client.subscribe("/TrackMonitor/track/sensor/#");
+  client.subscribe("/TrackMonitor/track/reference/#")
+}
+
+// called when the client loses its connection
+function onConnectionLost(responseObject) {
+  if (responseObject.errorCode !== 0) {
+    console.log("onConnectionLost:"+responseObject.errorMessage);
+  }
+}
+
+// called when a message arrives
+function onMessageArrived(message) {
+  // console.log(message)
+  // console.log(message.destinationName + " onMessageArrived: "+message.payloadString);
+  if ( message.topic == '/TrackMonitor/webapp/saved' ){
+    // console.log("GOT IT!", message)
+      console.log('New reference image is', currentRefImage)
+      refImage.onload = ()=>{
+        draw();
+      }
+      refImage.src = '/ref/' + referenceImages[currentRefImage];
+  }
+  if ( message.topic.includes('monitorResult') ){
+    // console.log("Got a monitor result", message.topic, message.payloadString)
+    let values = message.payloadString.split(',')
+    // console.log(values)
+    drawGraph(values)
+  }
+  let topic = message._getDestinationName()
+  // console.log('Topic', topic, message.payloadString)
+  if ( topic.includes("/sensor/") ){
+    let sensor = parseInt(topic.match(/sensor\/(.*)/)[1])
+    for ( let d in data ){
+      if ( data[d].id == sensor ){
+        if ( message.payloadString == 'ACTIVE' ){
+          data[d].state = 1;
+        } else {
+          data[d].state = 0;
+        }
+      }
+    }
+    drawActiveState(currentMonitorSensor);
+    // console.log('Topic', topic, message.payloadString)
+    if ( topic.includes("/reference/id") ){
+      currentRefImage = parseInt(message.payloadString);
+
+      console.log('New reference image is', currentRefImage)
+      refImage.onload = ()=>{
+        draw();
+      }
+      refImage.src = '/ref/' + referenceImages[currentRefImage];
+    }
+  }
+}
+
+
+    </script>
+
+</html>
