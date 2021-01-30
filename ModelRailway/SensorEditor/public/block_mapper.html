@@ -124,7 +124,7 @@ const renderData = ()=>{
   let html = '';
   maxSensorID = 0;
   for ( let sensor of data ){
-    html += `<tr id="row_${sensor.id}" ${(current && current.id == sensor.id)?'class="click_highlight"':''} onmouseover="highlight(${sensor.id})">
+    html += `<tr id="row_${sensor.id}" ${(current && current.id == sensor.id)?'class="click_highlight"':''} onclick="editMode(${sensor.id})" onmouseover="highlight(${sensor.id})">
       <td>${sensor.id}</td>
       <td>${sensor.points.length}</td>
       <td>${sensor.type}</td>
@@ -362,15 +362,16 @@ resequenceButton.onclick = renumber;
 
 let drawing = false;
 let current = null;
+let lastCurrent = null;
 
 //=============================================================================
 // Remove the last added item to the sensor in context via the edit button
 //=============================================================================
 
 undo.onclick = ()=>{
-  if ( current ){
-    current.points.pop();
-    draw(current.id);   
+  if ( lastCurrent ){
+    lastCurrent.points.pop();
+    draw(lastCurrent.id);   
     renderData();
   }
 }
@@ -573,6 +574,8 @@ canvas.addEventListener('mousedown', (e)=>{
           r.scrollIntoView()
           setClicked(sensor.id);
           highlight(sensor.id)
+          current = sensor;
+          lastCurrent = sensor;
         }
       }
     }
