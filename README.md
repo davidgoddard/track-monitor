@@ -9,5 +9,5 @@ The software is split into two parts:
   * A NodeJS server hosting a simple web site containing two web pages:  One to capture reference images and one to enable a user to define the sensor locations.
 
 # Setup and Use
-Refer to the Instructables site for more information.
+[Refer to the Instructables site for more information.](https://www.instructables.com/Block-Occupancy-Detector-and-Position-Sensors-for-/)
 
