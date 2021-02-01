@@ -19,4 +19,4 @@ source /usr/local/bin/virtualenvwrapper.sh
 
 
 cd /home/pi/ModelRailway/TrackMonitor
-python track_mon_mqtt6.py 2>&1 > track_monitor.log &
+python track_mon_mqtt.py 2>&1 > track_monitor.log &
