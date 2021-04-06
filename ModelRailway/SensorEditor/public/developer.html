@@ -1,0 +1,104 @@
+ <html>
+  <meta charset="UTF-8">
+  <meta name="description" content="Track Monintor setup app">
+  <meta name="author" content="David Goddard">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="/js/paho-mqtt-min.js"></script>  
+
+  <link rel="stylesheet" href="/css/style.css">
+
+  <style>
+    label {
+      color: white;
+      display: block!important;
+    }
+  </style>
+
+    <body>
+
+      <header>
+        <h1>Developer</h1>
+      </header>
+      <section id="controls">
+      </section>
+    </body>
+
+    <script>
+
+
+let values = {};
+
+//=============================================================================
+// Handle communication with MQTT broker
+//=============================================================================
+
+
+// Create a client instance
+client = new Paho.MQTT.Client('mqtt.local', 9001, "developerApp" + new Date());
+// set callback handlers
+client.onConnectionLost = onConnectionLost;
+client.onMessageArrived = onMessageArrived;
+
+// connect the client
+client.connect({onSuccess:onConnect, keepAliveInterval: 3000});
+
+
+// called when the client connects
+function onConnect() {
+  // Once a connection has been made, make a subscription and send a message.
+  console.log("onConnect");
+  client.subscribe("/Developer/#");
+  client.subscribe("/DeveloperControl");
+}
+
+// called when the client loses its connection
+function onConnectionLost(responseObject) {
+  if (responseObject.errorCode !== 0) {
+    console.log("onConnectionLost:"+responseObject.errorMessage);
+  }
+}
+
+// called when a message arrives
+function onMessageArrived(message) {
+  // console.log(message)
+  // console.log(message.destinationName + " onMessageArrived: "+message.payloadString);
+  if ( message.topic.includes('Developer/') ){
+    console.log("Got a monitor result", message.topic, message.payloadString)
+    let a = message.topic.split('/')[2]
+    values[a] = parseFloat(message.payloadString)
+    let o = document.querySelector('#' + a);
+    if ( o ){
+      o.value = values[a]
+      let v = document.querySelector('#' + a + '_value');
+      v.textContent = values[a]
+    }
+  }
+  if ( message.topic.includes('DeveloperControl') ){
+    console.log('Got controls', values)
+    console.log(message.payloadString)
+    let controls = JSON.parse(message.payloadString)
+    let h = ''
+    controls.forEach((c) => {
+      h += `<label>${c.name}: <input id="slider${c.control}" type="range" min=${c.min} max=${c.max} step=${c.step} value=${values['slider'+c.control]} /><span id="slider${c.control}_value">${values['slider'+c.control]}</span></label>`
+    })
+    let s = document.querySelector('#controls')
+    s.innerHTML = h;
+    s.onchange = (e) => {
+      console.log(e.target.id, e.target.value)
+      sendValue(e.target.id, e.target.value)
+    }
+  }
+}
+
+
+function sendValue(name, value){
+  let message = new Paho.MQTT.Message(value);
+  message.destinationName = "/Developer/" + name;
+  message.retained = true;
+  client.send(message);
+}
+
+    </script>
+
+</html>

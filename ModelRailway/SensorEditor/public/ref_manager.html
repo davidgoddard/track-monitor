@@ -186,7 +186,7 @@ currentRefSimilarity = -1;
 
 
 // Create a client instance
-client = new Paho.MQTT.Client('raspberrypi.local', 9001, "ref-manager");
+client = new Paho.MQTT.Client('mqtt.local', 9001, "ref-manager");
 // set callback handlers
 client.onConnectionLost = onConnectionLost;
 client.onMessageArrived = onMessageArrived;

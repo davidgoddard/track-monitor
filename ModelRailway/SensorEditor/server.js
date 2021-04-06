@@ -53,6 +53,9 @@ app.get('/restart', (req, res) => {
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '/public', 'block_mapper.html'));
 });
+app.get('/dev', (req, res) => {
+    res.sendFile(path.join(__dirname, '/public', 'developer.html'));
+});
 
 app.listen(80, () => {
 	console.log('Sensor/Block Editor app server')

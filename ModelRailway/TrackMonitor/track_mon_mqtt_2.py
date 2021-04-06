@@ -11,7 +11,6 @@ import json
 from scipy import signal, ndimage, spatial
 from scipy import misc
 from skimage.transform import resize
-from skimage.metrics import structural_similarity as ssim
 import numpy as np
 import time
 import datetime
@@ -24,9 +23,6 @@ import sys, getopt
 import my_lib
 
 REF_FOLDER = './ref/'
-MODE = 'MONITOR'
-
-WATCH = '0'
 
 """
 ==============================================================================================
@@ -38,7 +34,7 @@ import paho.mqtt.client as mqtt
 
 # The callback for when the client receives a CONNACK response from the server.
 def on_connect(client, userdata, flags, rc):
-    print("Connected with result code "+str(rc))
+    print("MQTT broker connected with result code "+str(rc))
 
     # Subscribing in on_connect() means that if we lose the connection and
     # reconnect then subscriptions will be renewed.
@@ -82,29 +78,6 @@ client.connect("localhost", 1883, keepalive=10000)
 
 client.loop_start(); # Place a thread in the background to read the incoming traffic and wait if necessary
 
-"""
-==============================================================================================
-Get a new reference image
-
-MQTT message - /TrackMonitor/webapp/ref
-
-This will take a screenshot and save it to disk
-==============================================================================================
-"""
-
-"""
-==============================================================================================
-Assess reference images and calibrate their similarity scores for all known sensors
-
-MQTT message - /TrackMonitor/webapp/calibrate
-
-This will take a new screenshot and score each sensor point.  A minimum and maximum value will
-be determined for the similarity.  The minimum value will be used as a base for this sensor
-sensitivity by setting a threshold at 90% of this minimum value.  I.e. if best similarity 
-for a sensor is measured at 20dB then the sensitivity will be set at 80% of 20dB. 
-==============================================================================================
-"""
-
 
 
 
@@ -112,7 +85,6 @@ for a sensor is measured at 20dB then the sensitivity will be set at 80% of 20dB
 
 vs = my_lib.Camera(src=0).start()
 
- 
 stats = np.zeros(100)
 statsPtr = 0
 currentRef = None
@@ -132,15 +104,12 @@ while ( True ):
     # Index by POI ID
 
     POI_MASK = {}
-    REF_IMAGE = []
-    REF_MASK = {}
-
     for p in POI['POI']:
         ID = p['id']
         p['state_changed'] = 0
         p['initialised'] = False
 
-        mask = np.zeros(my_lib.DIM)
+        mask = np.zeros(my_lib.IMAGE_SHAPE)
         
         # create mask of all points in this sensor
 
@@ -153,16 +122,12 @@ while ( True ):
             mask = my_lib.maskPoint(mask, int(w * float(xy[0])), int(h * float(xy[1])), p['radius'])
 
         mask = mask.reshape((h*w))
-        print(mask.shape)
-
-
         POI_MASK[ID] = np.asarray(np.where(mask > 0))
 
-        # for r in range(mask.shape[0]):
-        #     for c in range(mask.shape[1]):
-        #         if ( mask[r,c] > 0 ):
-        #             POI_MASK[ID].append([r,c])
-        print('Mask', ID, 'contains', np.sum(mask), len(POI_MASK[ID]))
+    REF_PRE_PROCESSED = []
+    REF_MASK = {}
+    REF_IMAGE = []
+    REF_SIZE = (10,10)
 
     onlyfiles = sorted([join(REF_FOLDER, f) for f in listdir(REF_FOLDER) if isfile(join(REF_FOLDER, f) )])
     fileCount = -1
@@ -170,8 +135,9 @@ while ( True ):
         fileCount = fileCount + 1
         print(file)
         frame = cv2.imread(file)
+        REF_IMAGE.append(cv2.resize(frame, REF_SIZE))
         frame = my_lib.prepareImage(frame)
-        REF_IMAGE.append(np.copy(frame))
+        REF_PRE_PROCESSED.append(np.copy(frame))
         h = my_lib.HEIGHT
         w = my_lib.WIDTH
         frame = frame.reshape((h*w))
@@ -180,9 +146,7 @@ while ( True ):
             ID = p['id']
             REF_MASK[fileCount][ID] = frame[POI_MASK[ID]]
             
-
-
-    if ( len(REF_IMAGE) == 0):
+    if ( len(REF_PRE_PROCESSED) == 0):
         saveNextFrame = REF_FOLDER + datetime.datetime.now().strftime("reference_%Y%m%d%H%M%S.png");
 
     print("All reference items now loaded")     
@@ -199,11 +163,16 @@ while ( True ):
     while ( not exitCurrentLoop):
         frame = vs.read()
 
-
-        # resize image
-        # frame = cv2.resize(frame, my_lib.DIM, interpolation = cv2.INTER_AREA)
-
         # Save image if requested
+        """
+        ==============================================================================================
+        Get a new reference image
+
+        MQTT message - /TrackMonitor/webapp/snapshot
+
+        This will take a screenshot and save it to disk
+        ==============================================================================================
+        """
         if ( saveNextFrame != None ):
             cv2.imwrite(saveNextFrame, frame)
             ret = client.publish("/TrackMonitor/webapp/saved", saveNextFrame);
@@ -212,77 +181,82 @@ while ( True ):
             exitCurrentLoop = True
 
         else:
+            frameForRef = cv2.resize(frame, REF_SIZE)
      
-            edges = my_lib.prepareImage(frame)
+            edges = my_lib.prepareImage(frame)  # from camera feed
 
             # Work out best reference image to use
 
             useRef = 0
             bestRefScore = -1
             for r in range(len(REF_IMAGE)):
-                s = my_lib.similarity(edges, REF_IMAGE[r])
+                s = my_lib.similarity(frameForRef, REF_IMAGE[r])
                 if ( bestRefScore < s ):
                     bestRefScore = s
-                    useRef = r
+                    useRef = r  
             if ( useRef != currentRef ):
+                print("Using ref image", useRef)
                 ret = client.publish("/TrackMonitor/track/reference/id", str(useRef), retain=True);
-                # ret = client.publish("/TrackMonitor/track/reference/score", str(currentRefScore).split('.')[0], retain=True);
-                # print("Switching to reference image", useRef, "/TrackMonitor/track/reference/" + str(useRef) )
                 currentRef = useRef
                 currentRefScore = bestRefScore
-                # cv2.imwrite("current_ref.jpg", REF_IMAGE[r])
-                # cv2.imwrite("current_live.jpg", edges)
+
+            # Compare sensor points with the same ones in the reference image
+            diff = my_lib.difference(edges, REF_PRE_PROCESSED[useRef])
+
+            stack = np.hstack([diff, edges])
+            # cv2.imwrite('example_diff.png', diff)
+            # cv2.imwrite('example_edges.png', edges)
+            # cv2.namedWindow("main", cv2.WINDOW_NORMAL)
+            # cv2.resizeWindow("main", 1200, 600)
+            # cv2.imshow("main",stack)
+            # if(cv2.waitKey(1) & 0xFF == ord('q')):
+            #     vs.stop()
+            #     cv2.destroyAllWindows()
 
 
-            # Compare sensor points with reference image
-            edges.shape = (edges.shape[0] * edges.shape[1])
+            diff.shape = (diff.shape[0] * diff.shape[1])
 
-            for sensor in POI['POI']:
+            for sensorIdx in range(len(POI['POI'])):
+                sensor = POI['POI'][sensorIdx]
                 ID = sensor['id']
+                
                 triggerLevel = int(sensor['sensitivity'])   # **2 #float(sensor['sensitivity'])
                 lastState = int(sensor['state'])
                 sensorState = 0
 
-
                 mask = POI_MASK[ID]
+                score = my_lib.scoreSubImageSimilarity(diff[mask])
+                # print("Sensor", ID, "score", score)
 
+                # sensorHistory[ID, sensorHistoryIdx] = score
+                # score = np.median(sensorHistory[ID])
 
-                c1 = edges[mask]
-                c2 = REF_MASK[useRef][ID]
-                # print(c1.shape, c2.shape)
-                # c1 = my_lib.crop(edges, mask)
-                # c2 = REF_MASK[useRef][ID]
-                score = my_lib.similarity(c1, c2)
-                # score = 10000
-                # print("POI", ID, score)
-
-                # print(ID, score)
-                if ( score < triggerLevel ):
+                if ( score > triggerLevel ):
                     sensorState = 1
 
                 if ( monitorSensor != None and monitorSensor == ID ):
                     timing.append(str(sensorState) + '|' + str(score))
                     timingP += 1
-                    if ( timingP > 100 ):
+                    if ( timingP > 10 ):
                         timingP = 0
                         ret = client.publish("/TrackMonitor/webapp/monitorResult", (",".join(timing)) )# str(int(bestSensorMatch)));
                         timing = []
-                        # print("Sent 20 timing values to server")
+                
 
-                if ( (sensor['initialised'] == False) or (lastState != sensorState) ):
-                    # print("Changed", time.perf_counter() - sensor['state_changed']);
-                    if ( (time.perf_counter() - sensor['state_changed']) > 1 ):
-                        sensor['initialised'] = True
-                        sensor['state'] = sensorState
-                        sensor['state_changed'] = time.perf_counter()
+                changedState = lastState != sensorState
+                sensor['state'] = int(sensorState)
 
-                        # notify MQTT server
-                        if ( sensorState == 1 ):
-                            ret = client.publish("/TrackMonitor/track/sensor/" + str(ID),"ACTIVE", retain=True);
-                            print("---------------------------- Sensor " + str(ID) + " Triggered with score ", score)
-                        else: 
-                            ret = client.publish("/TrackMonitor/track/sensor/" + str(ID),"INACTIVE", retain=True);
-                            print("---------------------------- Sensor " + str(ID) + " Cleared with score ", score)
+                if ( (sensor['initialised'] == False) or changedState ):
+                    sensor['initialised'] = True
+                    sensor['state_changed'] = time.perf_counter()
+
+                    # notify MQTT server
+                    if ( sensorState == 1 ):
+                        ret = client.publish("/TrackMonitor/track/sensor/" + str(ID),"ACTIVE", retain=True);
+                        print("---------------------------- Sensor " + str(ID) + " Triggered with score ", score)
+                    else: 
+                        ret = client.publish("/TrackMonitor/track/sensor/" + str(ID),"INACTIVE", retain=True);
+                        print("---------------------------- Sensor " + str(ID) + " Cleared with score ", score)
 
         toc = time.perf_counter()
         stats[statsPtr] = (toc - tic)

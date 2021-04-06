@@ -25,7 +25,7 @@
 
           </div>
             <label>Default Sensitivity (new only): 
-              <input id="default_sensitivity" type="number" min="1" max="50" step="1" value="14"/>
+              <input id="default_sensitivity" type="number" min="1" max="250" step="1" value="170"/>
             </label>
           <div id="tableBox">
             <table onmouseout="highlight()">
@@ -129,7 +129,7 @@ const renderData = ()=>{
       <td>${sensor.points.length}</td>
       <td>${sensor.type}</td>
       <td><input type="number" min=3 max=20 step=1 value="${sensor.radius}" oninput="setRadius(${sensor.id}, this.value)"/></td>
-      <td><input type="number" min=1 max=40 step=1 value="${sensor.sensitivity}" onchange="setSensitivity(${sensor.id}, this.value)"/><button onclick="monitor(this, ${sensor.id}); ">Monitor Live</button></td>
+      <td><input type="number" min=1 max=240 step=1 value="${sensor.sensitivity}" onchange="setSensitivity(${sensor.id}, this.value)"/><button onclick="monitor(this, ${sensor.id}); ">Monitor Live</button></td>
       <td>
         <button onclick="deleteItem(${sensor.id});">Delete</button>
       </td>
@@ -425,7 +425,7 @@ function drawActiveState(highlight = null){
           context.arc(pos[0], pos[1], sensor.radius, 0, 2*Math.PI);
           context.strokeStyle = "blue"
           if ( sensor.state == 1){
-            context.fillStyle = (highlight && highlight == sensor.id)?"orange":"red";
+            context.fillStyle = (highlight && highlight == sensor.id)?"orange":"yellow";
             context.fill();
           } else {
             if ( highlight && highlight == sensor.id ){
@@ -629,7 +629,7 @@ function drawGraph(data){
     ctx.font = "20px Arial";
     ctx.fillText(`Sensor: ${currentMonitorSensor.id}     Min value = ${min} Max value = ${max} Trigger Level = ${currentMonitorSensor.sensitivity}`, 10, 30);
 
-    let scale = 2
+    let scale = 0.5
     
     ctx.beginPath();
     ctx.strokeStyle = 'blue';
@@ -698,7 +698,7 @@ fetchReferences();
 
 
 // Create a client instance
-client = new Paho.MQTT.Client('raspberrypi.local', 9001, "block-setup");
+client = new Paho.MQTT.Client('mqtt.local', 9001, "block-setup");
 // set callback handlers
 client.onConnectionLost = onConnectionLost;
 client.onMessageArrived = onMessageArrived;
