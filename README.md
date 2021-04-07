@@ -21,11 +21,11 @@ The reference image was taken with nothing on the track and there are lots of ve
 
 You can see that the difference image is less than perfect (not perfect outlines of the trains) but all it needs is a few white pixels in order to trigger.
 
-	[Comparing images](https://github.com/davidgoddard/track-monitor/blob/main/example1.png)
+![Comparing images](https://github.com/davidgoddard/track-monitor/blob/main/example1.png)
 
 Below is the a video clip showing the web page view which shows the background reference image change due to changes in lighting but the detected train locations is not affected.
 
-	[Showing lighting changes](https://github.com/davidgoddard/track-monitor/blob/main/example2.mov)
+![Showing lighting changes](https://github.com/davidgoddard/track-monitor/blob/main/example2.mov)
 
 
 The images from the camera are converted to black and white, blurred and then run through a ‘scharr’ filter which is a pair of 3x3 matrices; one for vertical changes and the other for horizontal changes.  This results in the edges of the track standing out and causing where the train to ‘look different’ and by subtracting the two images you are left with the differences.
