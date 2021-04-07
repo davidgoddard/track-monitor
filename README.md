@@ -23,6 +23,10 @@ You can see that the difference image is less than perfect (not perfect outlines
 
 ![Comparing images](https://github.com/davidgoddard/track-monitor/blob/main/example1.png)
 
-The images from the camera are converted to black and white, blurred and then run through a ‘scharr’ filter which is a pair of 3x3 matrices; one for vertical changes and the other for horizontal changes.  This results in the edges of the track standing out and causing where the train to ‘look different’ and by subtracting the two images you are left with the differences.
+The images are firstly compared to all reference images to find one with the closest match which allows for different lighting conditions.  Then the image from the camera is converted to black and white, blurred and then run through a ‘scharr’ filter; a pair of 3x3 matrices - one for vertical changes and the other for horizontal changes.  This results in the edges of the track standing out a little and causing where the train is to ‘look different’ and by subtracting the two images you are left with the differences.  By thresholding the result the output gives white pixels where there is a significant different and black everywhere else.  A sensor is triggered when the number of white pixels overlapping a sensor/block area of the image exceeds the user's defined trigger level.  
 
 It is possible to get better results but not as fast.  This version takes around 60ms to grab a frame off the camera, process it, detect all the points the user has setup as blocks and sensors and broadcast over MQTT which sensors are currently being triggered - not bad for a Raspberry Pi model 3 costing around 30 quid!
+
+Here is a view of the demonstration layout taken from the web app which overlays the blocks and sensors I have added - blocks are created by dragging the mouse over the image to make a line which it renders as lots of circles.  A sensor is just a single mouse-click and is shown as blue circles. The user can define any number, any shape and they can overlap as much as required.
+
+![Comparing images](https://github.com/davidgoddard/track-monitor/blob/main/example2.png)
