@@ -15,6 +15,8 @@ The software is split into two parts:
 
 [Video showing live action on a demonstration model railway](https://youtu.be/tM7jrEE13So)
 
+Note that in the video there is a short delay between a train entering a block and software registering it, this is due entirely to the USB web cam use which takes approximately half a second to get a frame from the camera to the computer.  Using a Raspberry Pi camera directly connected results in much less time lag.  The processing time per frame is only about 65ms and therefore not the issue.
+
 Here is a picture showing on the left: the live feed, in the middle: the reference image and on the right: the differences.  There are three locomotives on the track as per the video; one at nearly 12 o’clock, one around 4 o’clock and the last one around 7 o’clock.  There are other changes being picked out as I have put or moved stuff from around the layout which is accounting for a lot of the other noise but those bits do not overlap with any virtual sensor I have setup it does not matter.
 
 The reference image was taken with nothing on the track and there are lots of versions of this under different lighting - about 10 images in all including side lighting only, overhead lighting only, combined, daylight, sunlight etc.
